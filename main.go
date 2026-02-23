@@ -84,5 +84,7 @@ func loadFeatures(disc *discordgo.Session) error {
 	})
 
 	_, err := leetcode.LoadAllProblems("data")
+	leetcode.BuildCuratedProblems()
+
 	return err
 }
