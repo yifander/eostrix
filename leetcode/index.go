@@ -2,12 +2,18 @@ package leetcode
 
 import (
 	"encoding/csv"
+	"eostrix/config"
+	"eostrix/utils"
 	"fmt"
 	"io"
+	"log"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 type Problem struct {
@@ -19,8 +25,8 @@ type Problem struct {
 	AcceptanceRate string
 	Link           string
 	Topics         []string
-	ProblemID      int  // Extracted from Link
-	IsNeetcode150  bool // Flag for curated list membership
+	ProblemID      int
+	IsNeetcode150  bool
 }
 
 var (
@@ -215,4 +221,47 @@ func extractTitleSlug(link string) string {
 		}
 	}
 	return ""
+}
+
+func PostRandomProblem(session *discordgo.Session, difficulty string) {
+	cfg := config.ParseConfig()
+
+	var problem *Problem
+
+	if difficulty != "" {
+		diffKey := strings.ToLower(difficulty)
+		candidates := ProblemsByDifficulty[diffKey]
+		if len(candidates) == 0 {
+			log.Printf("No problems found with difficulty: %s", difficulty)
+			return
+		}
+		problem = candidates[rand.Intn(len(candidates))]
+	} else {
+		if len(AllProblems) == 0 {
+			log.Printf("No problems loaded")
+			return
+		}
+		problem = &AllProblems[rand.Intn(len(AllProblems))]
+	}
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("**Problem:** %s\n", problem.Title))
+	builder.WriteString(fmt.Sprintf("**Difficulty:** %s\n", problem.Difficulty))
+	builder.WriteString(fmt.Sprintf("**Topics:** %s\n", strings.Join(problem.Topics, ", ")))
+	builder.WriteString(fmt.Sprintf("**Company:** %s\n", problem.Company))
+	builder.WriteString(fmt.Sprintf("**Acceptance Rate:** %s\n", problem.AcceptanceRate))
+	builder.WriteString(fmt.Sprintf("\n**Link:** %s\n", problem.Link))
+
+	if problem.IsNeetcode150 {
+		builder.WriteString("\n**Part of Neetcode 150**")
+	}
+
+	ping := fmt.Sprintf("<@&%s> ", cfg.LeetcodeRoleID)
+
+	title := "Random LeetCode Problem"
+	if difficulty != "" {
+		title = fmt.Sprintf("Random %s LeetCode Problem", difficulty)
+	}
+
+	utils.SendPingMessageComplex(session, cfg.DefaultChannel, title, ping, builder.String())
 }

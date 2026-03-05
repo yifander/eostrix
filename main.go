@@ -81,6 +81,7 @@ func initHandlers(disc *discordgo.Session) {
 func loadFeatures(disc *discordgo.Session) error {
 	utils.ScheduleMidnightUTCEvent(func() {
 		leetcode.PostRandomNeetcode(disc, "")
+		leetcode.PostRandomProblem(disc, "")
 	})
 
 	_, err := leetcode.LoadAllProblems("data")
