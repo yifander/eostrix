@@ -256,12 +256,10 @@ func PostRandomProblem(session *discordgo.Session, difficulty string) {
 		builder.WriteString("\n**Part of Neetcode 150**")
 	}
 
-	ping := fmt.Sprintf("<@&%s> ", cfg.LeetcodeRoleID)
-
 	title := "Random LeetCode Problem"
 	if difficulty != "" {
 		title = fmt.Sprintf("Random %s LeetCode Problem", difficulty)
 	}
 
-	utils.SendPingMessageComplex(session, cfg.DefaultChannel, title, ping, builder.String())
+	utils.SendMessageComplex(session, cfg.DefaultChannel, title, builder.String())
 }
