@@ -109,6 +109,10 @@ func PostDailyChallenge(session *discordgo.Session, slug string) {
 	link := fmt.Sprintf("https://leetcode.com/problems/%s/", daily.TitleSlug)
 	builder.WriteString(fmt.Sprintf("**Link:** \n%s\n", link))
 
+	if IsNeetcode150Slug(daily.TitleSlug) {
+		builder.WriteString("\n**Part of Neetcode 150**")
+	}
+
 	ping := fmt.Sprintf("<@&%s> ", cfg.LeetcodeRoleID)
 
 	utils.SendPingMessageComplex(session, cfg.DefaultChannel, "Daily Neetcode All Challenge", ping, builder.String())

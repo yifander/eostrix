@@ -2,31 +2,22 @@ package leetcode
 
 import (
 	"encoding/csv"
-	"eostrix/config"
-	"eostrix/utils"
 	"fmt"
 	"io"
-	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-
-	"github.com/bwmarrin/discordgo"
 )
 
+// represents an individual leetcode problem found within the csv file
 type Problem struct {
 	Company        string
 	Difficulty     string
 	Title          string
-	TitleSlug      string
 	Frequency      string
 	AcceptanceRate string
 	Link           string
 	Topics         []string
-	ProblemID      int
-	IsNeetcode150  bool
 }
 
 var (
@@ -39,6 +30,7 @@ var (
 	ValidTopics          []string
 )
 
+// search each company folder for the correct six month cvs file
 func findSixMonthCSV(companyDir string) (string, error) {
 	entries, err := os.ReadDir(companyDir)
 	if err != nil {
@@ -52,6 +44,7 @@ func findSixMonthCSV(companyDir string) (string, error) {
 	return "", fmt.Errorf("a six month csv not found in %s", companyDir)
 }
 
+// load the leetcode problems from the six month cvs files to the CompanyProblem struct
 func LoadAllProblems(rootDir string) ([]Problem, error) {
 	AllProblems = make([]Problem, 0)
 
@@ -113,8 +106,6 @@ func LoadAllProblems(rootDir string) ([]Problem, error) {
 			}
 
 			topics := parseTopics(record[5:])
-			link := record[4]
-			problemID := parseProblemID(record, link)
 
 			AllProblems = append(AllProblems, Problem{
 				Company:        companyName,
@@ -122,14 +113,12 @@ func LoadAllProblems(rootDir string) ([]Problem, error) {
 				Title:          record[1],
 				Frequency:      record[2],
 				AcceptanceRate: record[3],
-				TitleSlug:      extractTitleSlug(record[4]),
-				Link:           link,
+				Link:           record[4],
 				Topics:         topics,
-				ProblemID:      problemID,
-				IsNeetcode150:  IsNeetcode150(problemID),
 			})
 
 			pp := &AllProblems[len(AllProblems)-1]
+
 			createIndexes(pp)
 		}
 
@@ -137,14 +126,12 @@ func LoadAllProblems(rootDir string) ([]Problem, error) {
 	}
 
 	fmt.Printf("Loaded %d problems across %d companies\n", len(AllProblems), len(entries))
-	fmt.Printf("Loaded %d topics across %d problems\n", len(ValidTopics), len(AllProblems))
-
-	InitNeetcodeIndex(AllProblems)
-	fmt.Printf("Indexed %d Neetcode 150 problems\n", len(GetAllNeetcodeProblems()))
+	fmt.Printf("Loaded %d topics accross %d problems\n", len(ValidTopics), len(AllProblems))
 
 	return AllProblems, nil
 }
 
+// index for company, difficulty, and topics
 func createIndexes(p *Problem) {
 	companyKey := strings.ToLower(p.Company)
 	ProblemsByCompany[companyKey] = append(ProblemsByCompany[companyKey], p)
@@ -154,6 +141,7 @@ func createIndexes(p *Problem) {
 
 	for _, t := range p.Topics {
 		key := strings.ToLower(t)
+
 		ProblemsByTopic[key] = append(ProblemsByTopic[key], p)
 
 		if _, exists := topicSet[key]; !exists {
@@ -163,46 +151,12 @@ func createIndexes(p *Problem) {
 	}
 }
 
-func parseProblemID(record []string, link string) int {
-	if len(record) > 6 {
-		if id, err := strconv.Atoi(record[6]); err == nil {
-			return id
-		}
-	}
-	return extractIDFromLink(link)
-}
-
-func extractIDFromLink(link string) int {
-	parts := strings.Split(link, "/")
-	for i, part := range parts {
-		if part == "problems" && i+1 < len(parts) {
-			slug := parts[i+1]
-			return lookupIDBySlug(slug)
-		}
-	}
-	return 0
-}
-
-var slugToIDMap = map[string]int{
-	"two-sum":         1,
-	"add-two-numbers": 2,
-	"longest-substring-without-repeating-characters": 3,
-	"median-of-two-sorted-arrays":                    4,
-	"longest-palindromic-substring":                  5,
-}
-
-func lookupIDBySlug(slug string) int {
-	if id, ok := slugToIDMap[slug]; ok {
-		return id
-	}
-	return 0
-}
-
 func parseTopics(columns []string) []string {
 	var topics []string
 
 	for _, col := range columns {
-		for part := range strings.SplitSeq(col, ",") {
+		// im using an old go version (1.23) so split is preferable to splitseq here
+		for _, part := range strings.Split(col, ",") {
 			topic := strings.TrimSpace(part)
 			if topic != "" {
 				topics = append(topics, topic)
@@ -211,55 +165,4 @@ func parseTopics(columns []string) []string {
 	}
 
 	return topics
-}
-
-func extractTitleSlug(link string) string {
-	parts := strings.Split(link, "/")
-	for i, part := range parts {
-		if part == "problems" && i+1 < len(parts) {
-			return parts[i+1]
-		}
-	}
-	return ""
-}
-
-func PostRandomProblem(session *discordgo.Session, difficulty string) {
-	cfg := config.ParseConfig()
-
-	var problem *Problem
-
-	if difficulty != "" {
-		diffKey := strings.ToLower(difficulty)
-		candidates := ProblemsByDifficulty[diffKey]
-		if len(candidates) == 0 {
-			log.Printf("No problems found with difficulty: %s", difficulty)
-			return
-		}
-		problem = candidates[rand.Intn(len(candidates))]
-	} else {
-		if len(AllProblems) == 0 {
-			log.Printf("No problems loaded")
-			return
-		}
-		problem = &AllProblems[rand.Intn(len(AllProblems))]
-	}
-
-	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("**Problem:** %s\n", problem.Title))
-	builder.WriteString(fmt.Sprintf("**Difficulty:** %s\n", problem.Difficulty))
-	builder.WriteString(fmt.Sprintf("**Topics:** %s\n", strings.Join(problem.Topics, ", ")))
-	builder.WriteString(fmt.Sprintf("**Company:** %s\n", problem.Company))
-	builder.WriteString(fmt.Sprintf("**Acceptance Rate:** %s\n", problem.AcceptanceRate))
-	builder.WriteString(fmt.Sprintf("\n**Link:** %s\n", problem.Link))
-
-	if problem.IsNeetcode150 {
-		builder.WriteString("\n**Part of Neetcode 150**")
-	}
-
-	title := "Random LeetCode Problem"
-	if difficulty != "" {
-		title = fmt.Sprintf("Random %s LeetCode Problem", difficulty)
-	}
-
-	utils.SendMessageComplex(session, cfg.DefaultChannel, title, builder.String())
 }
