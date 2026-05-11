@@ -10,12 +10,11 @@ import (
 )
 
 // HandleCompanyCommand sends the first page of company problems
-func HandleCompanyCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func HandleCompanyCommand(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	data := i.ApplicationCommandData()
-	opts := data.Options
-
-	company := strings.ToLower(opts[0].StringValue())
-	difficulty := strings.ToLower(opts[1].StringValue())
+	companyName := data.Options[0].StringValue()
+	difficulty := data.Options[1].StringValue()
+	problems := store.ByCompany(companyName)
 
 	switch difficulty {
 	case "easy", "medium", "hard", "all":
@@ -24,15 +23,15 @@ func HandleCompanyCommand(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		return
 	}
 
-	problems, ok := leetcode.ProblemsByCompany[company]
-	if !ok || len(problems) == 0 {
-		utils.ResponseError(s, i, fmt.Sprintf("No problems found for company %s", company))
+	companyProblems := store.ByCompany(companyName)
+	if len(problems) == 0 {
+		utils.ResponseError(s, i, fmt.Sprintf("No problems found for company '%s'", companyName))
 		return
 	}
 
 	// filter by difficulty
 	var filtered []*leetcode.Problem
-	for _, p := range problems {
+	for _, p := range companyProblems {
 		if difficulty == "all" || strings.EqualFold(p.Difficulty, difficulty) {
 			filtered = append(filtered, p)
 		}
@@ -50,16 +49,16 @@ func HandleCompanyCommand(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	}
 	leetcode.StorePage(i.Member.User.ID, pageData)
 
-	renderCompanyPage(s, i, pageData, company, difficulty, true)
+	renderCompanyPage(s, i, pageData, companyName, difficulty, true)
 }
 
-func CompanyAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func CompanyAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	data := i.ApplicationCommandData()
 
 	userInput := strings.ToLower(data.Options[0].StringValue())
 	var suggestions []*discordgo.ApplicationCommandOptionChoice
 
-	for _, vc := range leetcode.ValidCompanies {
+	for _, vc := range store.Companies() {
 		if strings.Contains(strings.ToLower(vc), userInput) {
 			suggestions = append(suggestions,
 				&discordgo.ApplicationCommandOptionChoice{

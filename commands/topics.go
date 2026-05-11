@@ -13,15 +13,15 @@ import (
 // syntax for command is /topics <category> <difficulty>
 const topicsPageSize = 10
 
-func HandleTopicsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func HandleTopicsCommand(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	data := i.ApplicationCommandData()
 	opts := data.Options
 
 	topic := strings.ToLower(opts[0].StringValue())
 	difficulty := strings.ToLower(opts[1].StringValue())
 
-	problems, ok := leetcode.ProblemsByTopic[topic]
-	if !ok || len(problems) == 0 {
+	problems := store.ByTopic(topic)
+	if len(problems) == 0 {
 		utils.ResponseError(s, i, fmt.Sprintf("No problems found for topic %s", topic))
 		return
 	}
@@ -42,7 +42,7 @@ func HandleTopicsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	renderTopicsPage(s, i, topic, difficulty, filtered, 0, true)
 }
 
-func TopicsAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func TopicsAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	data := i.ApplicationCommandData()
 
 	var userInput string
@@ -65,9 +65,10 @@ func TopicsAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 	}
 
+	allTopics := store.Topics()
 	suggestions := make([]*discordgo.ApplicationCommandOptionChoice, 0, 25)
 
-	for _, vt := range leetcode.ValidTopics {
+	for _, vt := range allTopics {
 		if strings.Contains(strings.ToLower(vt), userInput) {
 			suggestions = append(suggestions, &discordgo.ApplicationCommandOptionChoice{
 				Name:  vt,
@@ -149,7 +150,7 @@ func renderTopicsPage(
 	}
 }
 
-func HandleTopicsPageChange(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func HandleTopicsPageChange(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	parts := strings.Split(i.MessageComponentData().CustomID, ":")
 	if len(parts) != 4 {
 		return
@@ -166,10 +167,13 @@ func HandleTopicsPageChange(s *discordgo.Session, i *discordgo.InteractionCreate
 		page--
 	}
 
-	problems := filterByDifficulty(
-		leetcode.ProblemsByTopic[topic],
-		difficulty,
-	)
+	problems := store.ByTopic(topic)
+	filtered := filterByDifficulty(problems, difficulty)
+
+	if len(filtered) == 0 {
+		utils.ResponseError(s, i, "No problems match those filters anymore")
+		return
+	}
 
 	renderTopicsPage(s, i, topic, difficulty, problems, page, false)
 }

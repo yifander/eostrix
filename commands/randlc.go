@@ -14,7 +14,7 @@ import (
 // provides a random leetcode problem based on difficulty
 // /randlc <difficulty>
 
-func HandleRandCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func HandleRandCommand(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	data := i.ApplicationCommandData()
 	opts := data.Options
 
@@ -27,15 +27,25 @@ func HandleRandCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	list := leetcode.ProblemsByDifficulty[difficulty]
-	if len(list) == 0 {
-		utils.ResponseError(s, i, "No LeetCode problems found for that difficulty.")
+	var candidates []*leetcode.Problem
+	if difficulty == "all" {
+		all := store.All()
+		candidates = make([]*leetcode.Problem, len(all))
+		for i := range all {
+			candidates[i] = &all[i]
+		}
+	} else {
+		candidates = store.ByDifficulty(difficulty)
+	}
+
+	if len(candidates) == 0 {
+		utils.ResponseError(s, i, fmt.Sprintf("No problems found for difficulty '%s'", difficulty))
 		return
 	}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	randomIndex := rng.Intn(len(list))
-	problem := list[randomIndex]
+	randomIndex := rng.Intn(len(candidates))
+	problem := candidates[randomIndex]
 
 	var topics []string
 	for _, t := range problem.Topics {
