@@ -47,22 +47,13 @@ func HandleRandCommand(s *discordgo.Session, i *discordgo.InteractionCreate, sto
 	randomIndex := rng.Intn(len(candidates))
 	problem := candidates[randomIndex]
 
-	var topics []string
-	for _, t := range problem.Topics {
-		topics = append(topics, t)
-	}
-
-	topicString := "None"
-	if len(topics) > 0 {
-		topicString = strings.Join(topics, ", ")
-	}
-
 	var builder strings.Builder
 
+	// users said they prefered leetcode problems without the topics because it felt
+	// more realistic towards an interview/challenge
 	builder.WriteString(fmt.Sprintf("**Challenge Name:** %s\n", problem.Title))
 	builder.WriteString(fmt.Sprintf("**Difficulty:** %s\n", problem.Difficulty))
-	builder.WriteString(fmt.Sprintf("**Topics:** %s\n", topicString))
 	builder.WriteString(fmt.Sprintf("**Link:** \n%s\n", problem.Link))
 
-	utils.Response(s, i, fmt.Sprintf("Random %s LeetCode Problem", problem.Difficulty), builder.String())
+	utils.Response(s, i, fmt.Sprintf("Random %s NeetCode Problem", problem.Difficulty), builder.String())
 }
