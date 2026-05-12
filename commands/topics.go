@@ -4,6 +4,7 @@ import (
 	"eostrix/leetcode"
 	"eostrix/utils"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -144,7 +145,12 @@ func renderTopicsPage(
 	}
 
 	if first {
-		utils.ResponseComponents(s, i, sb.String(), components)
+		err := utils.ResponseComponents(s, i, sb.String(), components)
+		if err != nil {
+			utils.ResponseError(s, i, "An error has been encountered. Ping Vander to get this fixed, ty.")
+			log.Printf("failed to respond: %v", err)
+			return
+		}
 	} else {
 		utils.ResponseComponentsEdit(s, i, sb.String(), components)
 	}

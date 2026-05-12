@@ -4,6 +4,7 @@ import (
 	"eostrix/leetcode"
 	"eostrix/utils"
 	"fmt"
+	"log"
 	"math/rand"
 	"strings"
 	"time"
@@ -55,5 +56,10 @@ func HandleRandCommand(s *discordgo.Session, i *discordgo.InteractionCreate, sto
 	builder.WriteString(fmt.Sprintf("**Difficulty:** %s\n", problem.Difficulty))
 	builder.WriteString(fmt.Sprintf("**Link:** \n%s\n", problem.Link))
 
-	utils.Response(s, i, fmt.Sprintf("Random %s NeetCode Problem", problem.Difficulty), builder.String())
+	err := utils.Response(s, i, fmt.Sprintf("Random %s NeetCode Problem", problem.Difficulty), builder.String())
+	if err != nil {
+		utils.ResponseError(s, i, "An error has been encountered. Ping Vander to get this fixed, ty.")
+		log.Printf("failed to respond: %v", err)
+		return
+	}
 }

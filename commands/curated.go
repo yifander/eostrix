@@ -4,6 +4,7 @@ import (
 	"eostrix/leetcode"
 	"eostrix/utils"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -72,7 +73,11 @@ func HandleCuratedCommand(s *discordgo.Session, i *discordgo.InteractionCreate, 
 		}
 	}
 
-	utils.Response(s, i, "Top Curated Problems", sb.String())
+	if err := utils.Response(s, i, "Top Curated Problems", sb.String()); err != nil {
+		utils.ResponseError(s, i, "An error has been encountered. Ping Vander to get this fixed, ty.")
+		log.Printf("failed to respond: %v", err)
+		return
+	}
 }
 
 func capitalize(s string) string {

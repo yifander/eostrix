@@ -28,7 +28,11 @@ func PostDailyChallenge(session *discordgo.Session, slug string, apiClient *Leet
 	cfg := config.ParseConfig()
 	ping := fmt.Sprintf("<@&%s> ", cfg.LeetcodeRoleID)
 
-	utils.SendPingMessageComplex(session, cfg.DefaultChannel, "Daily Neetcode Challenge", ping, message)
+	err = utils.SendPingMessageComplex(session, cfg.DefaultChannel, "Daily Neetcode Challenge", ping, message)
+	if err != nil {
+		log.Printf("failed to respond: %v", err)
+		return
+	}
 }
 
 // buildDailyChallengeMessage formats the API response into a Discord-friendly message
