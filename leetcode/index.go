@@ -35,6 +35,10 @@ type ProblemStore struct {
 	topicSet       map[string]struct{}
 	lastLoadedTime time.Time
 	sourceChecksum string
+
+	// see curated.go for more on this list type
+	curatedMu       sync.RWMutex
+	curatedProblems []*CuratedProblem
 }
 
 func NewProblemStore() *ProblemStore {
@@ -250,4 +254,21 @@ func (s *ProblemStore) Topics() []string {
 	copy(out, s.validTopics)
 
 	return out
+}
+
+func (s *ProblemStore) TopCuratedByDifficulty(limit int, difficulty string) []*CuratedProblem {
+	s.curatedMu.RLock()
+	defer s.curatedMu.RUnlock()
+
+	var filtered []*CuratedProblem
+	for _, cp := range s.curatedProblems {
+		if difficulty == "all" || strings.EqualFold(cp.Problem.Difficulty, difficulty) {
+			filtered = append(filtered, cp)
+		}
+	}
+
+	if limit > len(filtered) {
+		limit = len(filtered)
+	}
+	return filtered[:limit]
 }

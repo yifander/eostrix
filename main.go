@@ -33,7 +33,7 @@ func main() {
 	}
 
 	initHandlers(disc, store)
-	loadFeatures(disc)
+	loadFeatures(disc, store)
 
 	fmt.Println("bot has started ...")
 	c := make(chan os.Signal, 1)
@@ -65,6 +65,8 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, st
 		commands.HandleRandCommand(s, i, store)
 	case "topics":
 		commands.HandleTopicsCommand(s, i, store)
+	case "curated":
+		commands.HandleCuratedCommand(s, i, store)
 	}
 }
 
@@ -87,8 +89,13 @@ func handleComponentInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 }
 
-func loadFeatures(disc *discordgo.Session) {
+func loadFeatures(disc *discordgo.Session, store *leetcode.ProblemStore) {
 	utils.ScheduleMidnightUTCEvent(func() {
 		leetcode.PostDailyChallenge(disc, leetcode.GetRandomNeetcodeSlug())
 	})
+
+	store.BuildCuratedProblems()
+
+	log.Printf("Built curated list: %d problems",
+		store.CuratedCount())
 }

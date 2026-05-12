@@ -75,6 +75,25 @@ func RegisterCommands(s *discordgo.Session) []*discordgo.ApplicationCommand {
 				},
 			},
 		},
+		{
+			// /curated <difficulty>
+			Name:        "curated",
+			Description: "Show most common LeetCode problems across companies",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:        "difficulty",
+					Description: "Filter by difficulty",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "Easy", Value: "easy"},
+						{Name: "Medium", Value: "medium"},
+						{Name: "Hard", Value: "hard"},
+						{Name: "All", Value: "all"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, cmd := range commands {
