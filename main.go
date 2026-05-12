@@ -90,8 +90,11 @@ func handleComponentInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 }
 
 func loadFeatures(disc *discordgo.Session, store *leetcode.ProblemStore) {
+	apiClient := leetcode.NewLeetCodeClient()
+
 	utils.ScheduleMidnightUTCEvent(func() {
-		leetcode.PostDailyChallenge(disc, leetcode.GetRandomNeetcodeSlug())
+		slug := leetcode.GetRandomNeetcodeSlug()
+		leetcode.PostDailyChallenge(disc, slug, apiClient)
 	})
 
 	store.BuildCuratedProblems()
