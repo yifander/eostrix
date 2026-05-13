@@ -10,6 +10,8 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+const companyPageSize = 10
+
 // HandleCompanyCommand sends the first page of company problems
 func HandleCompanyCommand(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	data := i.ApplicationCommandData()
@@ -43,31 +45,38 @@ func HandleCompanyCommand(s *discordgo.Session, i *discordgo.InteractionCreate, 
 		return
 	}
 
-	pageData := &leetcode.PageData{
-		Problems: filtered,
-		Page:     0,
-		PageSize: 10,
-	}
-	leetcode.StorePage(i.Member.User.ID, pageData)
+	leetcode.DefaultPagination.Store(
+		i.Member.User.ID,
+		"company",
+		toAnySlice(filtered),
+		companyPageSize,
+		map[string]string{
+			"company":    companyName,
+			"difficulty": difficulty,
+		},
+	)
 
-	renderCompanyPage(s, i, pageData, companyName, difficulty, true)
+	renderCompanyPage(s, i, 0, true)
 }
 
+// CompanyAutocomplete provides suggestions as user types
 func CompanyAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	data := i.ApplicationCommandData()
+	if len(data.Options) == 0 {
+		return
+	}
 
 	userInput := strings.ToLower(data.Options[0].StringValue())
 	var suggestions []*discordgo.ApplicationCommandOptionChoice
 
-	for _, vc := range store.Companies() {
-		if strings.Contains(strings.ToLower(vc), userInput) {
-			suggestions = append(suggestions,
-				&discordgo.ApplicationCommandOptionChoice{
-					Name:  vc,
-					Value: vc,
-				})
+	for _, company := range store.Companies() {
+		if strings.Contains(strings.ToLower(company), userInput) {
+			suggestions = append(suggestions, &discordgo.ApplicationCommandOptionChoice{
+				Name:  company,
+				Value: company,
+			})
 		}
-		if len(suggestions) == 25 {
+		if len(suggestions) >= 25 {
 			break
 		}
 	}
@@ -80,84 +89,88 @@ func CompanyAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, s
 	})
 }
 
-// renderCompanyPage handles both first page posting and editing of all other pages
-func renderCompanyPage(s *discordgo.Session, i *discordgo.InteractionCreate, data *leetcode.PageData, company, difficulty string, first bool) {
-	start := data.Page * data.PageSize
-	end := utils.Min(start+data.PageSize, len(data.Problems))
+// renderCompanyPage renders a page of results (initial or edit)
+func renderCompanyPage(s *discordgo.Session, i *discordgo.InteractionCreate, page int, isFirst bool) {
+	pageData := leetcode.DefaultPagination.Get(i.Member.User.ID, "company")
+	if pageData == nil {
+		utils.ResponseError(s, i, "Session expired. Please run /company again")
+		return
+	}
+
+	problems := toProblemSlice(pageData.Problems)
+	start := page * pageData.PageSize
+	end := min(start+pageData.PageSize, len(problems))
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf(
 		"**Company: %s**\n**Difficulty: %s**\n**Page %d / %d**\n\n",
-		company,
-		difficulty,
-		data.Page+1,
-		(len(data.Problems)+data.PageSize-1)/data.PageSize,
+		pageData.Metadata["company"],
+		pageData.Metadata["difficulty"],
+		page+1,
+		pageData.TotalPages,
 	))
 
-	for _, p := range data.Problems[start:end] {
+	for _, p := range problems[start:end] {
 		sb.WriteString(fmt.Sprintf("• %s (%s) %s freq\n%s\n\n",
 			p.Title, p.Difficulty, p.Frequency, p.Link))
 	}
 
-	components := []discordgo.MessageComponent{
-		discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				&discordgo.Button{
-					CustomID: fmt.Sprintf("company_prev|%s|%s", company, difficulty),
-					Label:    "Prev",
-					Style:    discordgo.PrimaryButton,
-					Disabled: data.Page == 0,
-				},
-				&discordgo.Button{
-					CustomID: fmt.Sprintf("company_next|%s|%s", company, difficulty),
-					Label:    "Next",
-					Style:    discordgo.PrimaryButton,
-					Disabled: (data.Page+1)*data.PageSize >= len(data.Problems),
-				},
-			},
-		},
-	}
+	components := leetcode.BuildPaginationButtons(
+		"company",
+		page,
+		pageData.TotalPages,
+		pageData.Metadata["company"],
+		pageData.Metadata["difficulty"],
+	)
 
-	if first {
-		err := utils.ResponseComponents(s, i, sb.String(), components)
-		if err != nil {
-			utils.ResponseError(s, i, "An error has been encountered. Ping Vander to get this fixed, ty.")
-			log.Printf("failed to respond: %v", err)
-			return
+	if isFirst {
+		if err := utils.ResponseComponents(s, i, sb.String(), components); err != nil {
+			log.Printf("failed to send initial response: %v", err)
+			utils.ResponseError(s, i, "An error occurred. Please try again.")
 		}
 	} else {
 		utils.ResponseComponentsEdit(s, i, sb.String(), components)
 	}
 }
 
-func HandleCompanyPageChange(s *discordgo.Session, i *discordgo.InteractionCreate, delta int) {
+// HandleCompanyPageChange handles pagination button clicks
+func HandleCompanyPageChange(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	if i.Member == nil || i.Member.User == nil {
-		utils.ResponseError(s, i, "cannot retrieve user info.")
+		utils.ResponseError(s, i, "Could not identify user")
 		return
 	}
 
-	user := i.Member.User.ID
-	data, ok := leetcode.GetPage(user)
-	if !ok {
-		utils.ResponseError(s, i, "pagination expired or missing.")
+	userID := i.Member.User.ID
+
+	cmd, action, _, _, err := leetcode.ParseButtonID(i.MessageComponentData().CustomID)
+	if err != nil || cmd != "company" {
+		utils.ResponseError(s, i, "Invalid pagination state")
 		return
 	}
 
-	parts := strings.Split(i.MessageComponentData().CustomID, "|")
-	if len(parts) != 3 {
-		utils.ResponseError(s, i, "invalid button data.")
+	pageData, err := leetcode.DefaultPagination.Navigate(userID, "company", action)
+	if err != nil {
+		utils.ResponseError(s, i, "Session expired. Please run /company again")
 		return
 	}
-	company := parts[1]
-	difficulty := parts[2]
 
-	data.Page += delta
-	if data.Page < 0 {
-		data.Page = 0
-	}
-	if data.Page*data.PageSize >= len(data.Problems) {
-		data.Page -= delta
-	}
+	renderCompanyPage(s, i, pageData.Page, false)
+}
 
-	renderCompanyPage(s, i, data, company, difficulty, false)
+func toAnySlice(problems []*leetcode.Problem) []any {
+	out := make([]any, len(problems))
+	for i, p := range problems {
+		out[i] = p
+	}
+	return out
+}
+
+func toProblemSlice(items []any) []*leetcode.Problem {
+	out := make([]*leetcode.Problem, len(items))
+	for i, item := range items {
+		if p, ok := item.(*leetcode.Problem); ok {
+			out[i] = p
+		}
+	}
+	return out
 }

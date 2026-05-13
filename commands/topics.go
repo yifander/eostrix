@@ -5,7 +5,6 @@ import (
 	"eostrix/utils"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -40,7 +39,18 @@ func HandleTopicsCommand(s *discordgo.Session, i *discordgo.InteractionCreate, s
 		return
 	}
 
-	renderTopicsPage(s, i, topic, difficulty, filtered, 0, true)
+	leetcode.DefaultPagination.Store(
+		i.Member.User.ID,
+		"topics",
+		toAnySlice(filtered),
+		topicsPageSize,
+		map[string]string{
+			"topic":      topic,
+			"difficulty": difficulty,
+		},
+	)
+
+	renderTopicsPage(s, i, 0, true)
 }
 
 func TopicsAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
@@ -54,29 +64,17 @@ func TopicsAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, st
 		}
 	}
 
-	if userInput == "" {
-		if userInput == "" {
-			_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionApplicationCommandAutocompleteResult,
-				Data: &discordgo.InteractionResponseData{
-					Choices: []*discordgo.ApplicationCommandOptionChoice{},
-				},
-			})
-			return
-		}
-	}
-
 	allTopics := store.Topics()
 	suggestions := make([]*discordgo.ApplicationCommandOptionChoice, 0, 25)
 
-	for _, vt := range allTopics {
-		if strings.Contains(strings.ToLower(vt), userInput) {
+	for _, t := range allTopics {
+		if strings.Contains(strings.ToLower(t), userInput) {
 			suggestions = append(suggestions, &discordgo.ApplicationCommandOptionChoice{
-				Name:  vt,
-				Value: vt,
+				Name:  t,
+				Value: t,
 			})
 		}
-		if len(suggestions) == 25 {
+		if len(suggestions) >= 25 {
 			break
 		}
 	}
@@ -89,33 +87,25 @@ func TopicsAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, st
 	})
 }
 
-func renderTopicsPage(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	topic, difficulty string,
-	problems []*leetcode.Problem,
-	page int,
-	first bool) {
-	totalPages := (len(problems) + topicsPageSize - 1) / topicsPageSize
-
-	start := page * topicsPageSize
-	end := start + topicsPageSize
-
-	if start >= len(problems) {
-		start = 0
-		page = 0
+func renderTopicsPage(s *discordgo.Session, i *discordgo.InteractionCreate, page int, isFirst bool) {
+	pageData := leetcode.DefaultPagination.Get(i.Member.User.ID, "topics")
+	if pageData == nil {
+		utils.ResponseError(s, i, "Session expired. Please run /topics again")
+		return
 	}
-	if end > len(problems) {
-		end = len(problems)
-	}
+
+	problems := toProblemSlice(pageData.Problems)
+
+	start := page * pageData.PageSize
+	end := min(start+pageData.PageSize, len(problems))
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf(
 		"**Topic:** %s\n**Difficulty:** %s\n**Page:** %d / %d\n\n",
-		topic,
-		difficulty,
+		strings.Title(pageData.Metadata["topic"]),
+		strings.Title(pageData.Metadata["difficulty"]),
 		page+1,
-		totalPages,
+		pageData.TotalPages,
 	))
 
 	for _, p := range problems[start:end] {
@@ -125,71 +115,44 @@ func renderTopicsPage(
 		))
 	}
 
-	components := []discordgo.MessageComponent{
-		discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				discordgo.Button{
-					Label:    "Prev",
-					Style:    discordgo.PrimaryButton,
-					CustomID: fmt.Sprintf("topics_prev:%s:%s:%d", topic, difficulty, page),
-					Disabled: page == 0,
-				},
-				discordgo.Button{
-					Label:    "Next",
-					Style:    discordgo.PrimaryButton,
-					CustomID: fmt.Sprintf("topics_next:%s:%s:%d", topic, difficulty, page),
-					Disabled: page >= totalPages-1,
-				},
-			},
-		},
-	}
+	components := leetcode.BuildPaginationButtons(
+		"topics",
+		page,
+		pageData.TotalPages,
+		pageData.Metadata["topic"],
+		pageData.Metadata["difficulty"],
+	)
 
-	if first {
-		err := utils.ResponseComponents(s, i, sb.String(), components)
-		if err != nil {
-			utils.ResponseError(s, i, "An error has been encountered. Ping Vander to get this fixed, ty.")
-			log.Printf("failed to respond: %v", err)
-			return
+	if isFirst {
+		if err := utils.ResponseComponents(s, i, sb.String(), components); err != nil {
+			log.Printf("failed to send initial response: %v", err)
+			utils.ResponseError(s, i, "An error occurred. Please try again.")
 		}
 	} else {
 		utils.ResponseComponentsEdit(s, i, sb.String(), components)
 	}
 }
 
+// HandleTopicsPageChange handles pagination button clicks
 func HandleTopicsPageChange(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
-	parts := strings.Split(i.MessageComponentData().CustomID, ":")
-	if len(parts) != 4 {
+	if i.Member == nil || i.Member.User == nil {
+		utils.ResponseError(s, i, "Could not identify user")
 		return
 	}
 
-	action := parts[0]
-	topic := parts[1]
-	difficulty := parts[2]
-	page, _ := strconv.Atoi(parts[3])
+	userID := i.Member.User.ID
 
-	if action == "topics_next" {
-		page++
-	} else {
-		page--
-	}
-
-	problems := store.ByTopic(topic)
-	filtered := filterByDifficulty(problems, difficulty)
-
-	if len(filtered) == 0 {
-		utils.ResponseError(s, i, "No problems match those filters anymore")
+	cmd, action, _, _, err := leetcode.ParseButtonID(i.MessageComponentData().CustomID)
+	if err != nil || cmd != "topics" {
+		utils.ResponseError(s, i, "Invalid pagination state")
 		return
 	}
 
-	renderTopicsPage(s, i, topic, difficulty, problems, page, false)
-}
-
-func filterByDifficulty(problems []*leetcode.Problem, diff string) []*leetcode.Problem {
-	var out []*leetcode.Problem
-	for _, p := range problems {
-		if strings.EqualFold(p.Difficulty, diff) {
-			out = append(out, p)
-		}
+	pageData, err := leetcode.DefaultPagination.Navigate(userID, "topics", action)
+	if err != nil {
+		utils.ResponseError(s, i, "Session expired. Please run /topics again")
+		return
 	}
-	return out
+
+	renderTopicsPage(s, i, pageData.Page, false)
 }
