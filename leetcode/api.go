@@ -29,10 +29,8 @@ type QuestionDetail struct {
 	TopicTags  []struct {
 		Name string `json:"name"`
 	} `json:"topicTags"`
-	Stats struct {
-		TotalAccepted   string `json:"totalAccepted"`
-		TotalSubmission string `json:"totalSubmission"`
-	} `json:"stats"`
+	Stats  string  `json:"stats"`
+	AcRate float64 `json:"acRate"`
 }
 
 type graphqlRequest struct {
@@ -57,7 +55,8 @@ query getQuestionDetail($titleSlug: String, $questionId: String) {
     titleSlug
     difficulty
     topicTags { name }
-    stats { totalAccepted totalSubmission }
+    stats        # ← Scalar, no sub-selection
+    acRate
   }
 }`
 
@@ -89,8 +88,12 @@ func (c *LeetCodeClient) fetch(ctx context.Context, key, value string) (*Questio
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "DiscordLeetCodeBot/1.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Origin", "https://leetcode.com")
+	req.Header.Set("Referer", "https://leetcode.com/problems/")
+	req.Header.Set("x-requested-with", "XMLHttpRequest")
 
 	resp, err := c.Client.Do(req)
 	if err != nil {
