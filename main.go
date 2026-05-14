@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -82,10 +83,12 @@ func handleAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, st
 func handleComponentInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	cid := i.MessageComponentData().CustomID
 	switch {
-	case strings.HasPrefix(cid, "company_"):
-		commands.HandleCompanyPageChange(s, i, 0)
-	case strings.HasPrefix(cid, "topics_"):
+	case strings.HasPrefix(cid, "company|"):
+		commands.HandleCompanyPageChange(s, i, store)
+	case strings.HasPrefix(cid, "topics|"):
 		commands.HandleTopicsPageChange(s, i, store)
+	case strings.HasPrefix(cid, "curated|"):
+		commands.HandleCuratedPageChange(s, i, store)
 	}
 }
 
@@ -98,6 +101,7 @@ func loadFeatures(disc *discordgo.Session, store *leetcode.ProblemStore) {
 	})
 
 	store.BuildCuratedProblems()
+	leetcode.InitPagination(15 * time.Minute)
 
 	log.Printf("Built curated list: %d problems",
 		store.CuratedCount())
