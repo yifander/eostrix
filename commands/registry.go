@@ -107,6 +107,10 @@ func RegisterCommands(s *discordgo.Session) []*discordgo.ApplicationCommand {
 				},
 			},
 		},
+		{
+			Name:        "eostrix",
+			Description: "Show bot command directory and features",
+		},
 	}
 
 	for _, cmd := range commands {

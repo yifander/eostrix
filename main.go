@@ -70,6 +70,8 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, st
 		commands.HandleCuratedCommand(s, i, store)
 	case "problem":
 		commands.HandleProblemCommand(s, i, apiClient)
+	case "eostrix":
+		commands.HandleEostrixCommand(s, i)
 	}
 }
 
