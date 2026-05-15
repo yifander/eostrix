@@ -50,8 +50,7 @@ func mockLeetCodeServer(t *testing.T) (*httptest.Server, *LeetCodeClient) {
 	t.Cleanup(server.Close)
 
 	client := &LeetCodeClient{
-		Client:  server.Client(),
-		BaseURL: server.URL,
+		Client: server.Client(),
 	}
 
 	return server, client
@@ -81,17 +80,6 @@ func TestLeetCodeClient_GetBySlug_Success(t *testing.T) {
 	_, client := mockLeetCodeServer(t)
 
 	q, err := client.GetBySlug(context.Background(), "two-sum")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	assertTwoSum(t, q)
-}
-
-func TestLeetCodeClient_GetByID_Success(t *testing.T) {
-	_, client := mockLeetCodeServer(t)
-
-	q, err := client.GetByID(context.Background(), 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -132,8 +120,7 @@ func TestLeetCodeClient_ContextTimeout(t *testing.T) {
 	defer slowServer.Close()
 
 	client := &LeetCodeClient{
-		Client:  slowServer.Client(),
-		BaseURL: slowServer.URL,
+		Client: slowServer.Client(),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

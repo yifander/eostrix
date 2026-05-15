@@ -94,6 +94,19 @@ func RegisterCommands(s *discordgo.Session) []*discordgo.ApplicationCommand {
 				},
 			},
 		},
+		{
+			// /problem <slug>
+			Name:        "problem",
+			Description: "Get LeetCode problem details by slug",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:        "slug",
+					Description: "slug (e.g., two-sum)",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Required:    true,
+				},
+			},
+		},
 	}
 
 	for _, cmd := range commands {

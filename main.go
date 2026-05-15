@@ -28,13 +28,14 @@ func main() {
 	}
 	defer disc.Close()
 
+	apiClient := leetcode.NewLeetCodeClient()
 	store := leetcode.NewProblemStore()
 	if err := store.Load("data"); err != nil {
 		log.Fatalf("failed to load leetcode data: %v", err)
 	}
 
-	initHandlers(disc, store)
-	loadFeatures(disc, store)
+	initHandlers(disc, store, apiClient)
+	loadFeatures(disc, store, apiClient)
 
 	fmt.Println("bot has started ...")
 	c := make(chan os.Signal, 1)
@@ -42,14 +43,13 @@ func main() {
 	<-c
 }
 
-func initHandlers(session *discordgo.Session, store *leetcode.ProblemStore) {
+func initHandlers(session *discordgo.Session, store *leetcode.ProblemStore, apiClient *leetcode.LeetCodeClient) {
 	commands.RegisterCommands(session)
 
-	// Single handler for all interaction types (cleaner + avoids duplicate registration)
 	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
-			handleSlashCommand(s, i, store)
+			handleSlashCommand(s, i, store, apiClient)
 		case discordgo.InteractionApplicationCommandAutocomplete:
 			handleAutocomplete(s, i, store)
 		case discordgo.InteractionMessageComponent:
@@ -58,7 +58,7 @@ func initHandlers(session *discordgo.Session, store *leetcode.ProblemStore) {
 	})
 }
 
-func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
+func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore, apiClient *leetcode.LeetCodeClient) {
 	switch i.ApplicationCommandData().Name {
 	case "company":
 		commands.HandleCompanyCommand(s, i, store)
@@ -68,6 +68,8 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, st
 		commands.HandleTopicsCommand(s, i, store)
 	case "curated":
 		commands.HandleCuratedCommand(s, i, store)
+	case "problem":
+		commands.HandleProblemCommand(s, i, apiClient)
 	}
 }
 
@@ -92,12 +94,10 @@ func handleComponentInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 }
 
-func loadFeatures(disc *discordgo.Session, store *leetcode.ProblemStore) {
-	apiClient := leetcode.NewLeetCodeClient()
-
+func loadFeatures(session *discordgo.Session, store *leetcode.ProblemStore, apiClient *leetcode.LeetCodeClient) {
 	utils.ScheduleMidnightUTCEvent(func() {
 		slug := leetcode.GetRandomNeetcodeSlug()
-		leetcode.PostDailyChallenge(disc, slug, apiClient)
+		leetcode.PostDailyChallenge(session, slug, apiClient)
 	})
 
 	store.BuildCuratedProblems()
