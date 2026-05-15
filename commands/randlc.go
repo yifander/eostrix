@@ -4,6 +4,7 @@ import (
 	"eostrix/leetcode"
 	"eostrix/utils"
 	"fmt"
+	"log"
 	"math/rand"
 	"strings"
 	"time"
@@ -14,7 +15,7 @@ import (
 // provides a random leetcode problem based on difficulty
 // /randlc <difficulty>
 
-func HandleRandCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func HandleRandCommand(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
 	data := i.ApplicationCommandData()
 	opts := data.Options
 
@@ -27,32 +28,38 @@ func HandleRandCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	list := leetcode.ProblemsByDifficulty[difficulty]
-	if len(list) == 0 {
-		utils.ResponseError(s, i, "No LeetCode problems found for that difficulty.")
+	var candidates []*leetcode.Problem
+	if difficulty == "all" {
+		all := store.All()
+		candidates = make([]*leetcode.Problem, len(all))
+		for i := range all {
+			candidates[i] = &all[i]
+		}
+	} else {
+		candidates = store.ByDifficulty(difficulty)
+	}
+
+	if len(candidates) == 0 {
+		utils.ResponseError(s, i, fmt.Sprintf("No problems found for difficulty '%s'", difficulty))
 		return
 	}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	randomIndex := rng.Intn(len(list))
-	problem := list[randomIndex]
-
-	var topics []string
-	for _, t := range problem.Topics {
-		topics = append(topics, t)
-	}
-
-	topicString := "None"
-	if len(topics) > 0 {
-		topicString = strings.Join(topics, ", ")
-	}
+	randomIndex := rng.Intn(len(candidates))
+	problem := candidates[randomIndex]
 
 	var builder strings.Builder
 
+	// users said they prefered leetcode problems without the topics because it felt
+	// more realistic towards an interview/challenge
 	builder.WriteString(fmt.Sprintf("**Challenge Name:** %s\n", problem.Title))
 	builder.WriteString(fmt.Sprintf("**Difficulty:** %s\n", problem.Difficulty))
-	builder.WriteString(fmt.Sprintf("**Topics:** %s\n", topicString))
 	builder.WriteString(fmt.Sprintf("**Link:** \n%s\n", problem.Link))
 
-	utils.Response(s, i, fmt.Sprintf("Random %s LeetCode Problem", problem.Difficulty), builder.String())
+	err := utils.Response(s, i, fmt.Sprintf("Random %s NeetCode Problem", problem.Difficulty), builder.String())
+	if err != nil {
+		utils.ResponseError(s, i, "An error has been encountered. Ping Vander to get this fixed, ty.")
+		log.Printf("failed to respond: %v", err)
+		return
+	}
 }

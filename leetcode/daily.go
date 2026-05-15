@@ -1,119 +1,53 @@
 package leetcode
 
 import (
-	"encoding/json"
+	"context"
 	"eostrix/config"
 	"eostrix/utils"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-type problemResponse struct {
-	Data struct {
-		Question struct {
-			QuestionID       string `json:"questionId"`
-			Title            string `json:"title"`
-			TitleSlug        string `json:"titleSlug"`
-			Difficulty       string `json:"difficulty"`
-			Content          string `json:"content"`
-			ExampleTestcases string `json:"exampleTestcases"`
-			CodeSnippets     []struct {
-				Lang     string `json:"lang"`
-				LangSlug string `json:"langSlug"`
-				Code     string `json:"code"`
-			} `json:"codeSnippets"`
-			Hints          []string `json:"hints"`
-			SampleTestCase string   `json:"sampleTestCase"`
-			MetaData       string   `json:"metaData"`
-		} `json:"question"`
-	} `json:"data"`
-}
+// PostDailyChallenge fetches the problem via the shared API client and posts to Discord
+func PostDailyChallenge(session *discordgo.Session, slug string, apiClient *LeetCodeClient) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-type LeetcodeProblem struct {
-	QuestionID   string
-	Title        string
-	TitleSlug    string
-	Difficulty   string
-	Content      string
-	Examples     string
-	CodeSnippets map[string]string
-	Hints        []string
-}
-
-func GetProblemBySlug(titleSlug string) (LeetcodeProblem, error) {
-	url := "https://leetcode.com/graphql"
-
-	query := fmt.Sprintf(`{
-		"query": "query questionData($titleSlug: String!) { question(titleSlug: $titleSlug) { questionId title titleSlug difficulty content exampleTestcases codeSnippets { lang langSlug code } hints sampleTestCase metaData } }",
-		"variables": {"titleSlug": "%s"}
-	}`, titleSlug)
-
-	req, err := http.NewRequest("POST", url, strings.NewReader(query))
+	question, err := apiClient.GetBySlug(ctx, slug)
 	if err != nil {
-		return LeetcodeProblem{}, err
+		log.Printf("failed to fetch problem '%s': %v", slug, err)
+		return
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	message := buildDailyChallengeMessage(question)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return LeetcodeProblem{}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return LeetcodeProblem{}, err
-	}
-
-	var pr problemResponse
-	if err := json.Unmarshal(body, &pr); err != nil {
-		return LeetcodeProblem{}, err
-	}
-
-	snippets := make(map[string]string)
-	for _, cs := range pr.Data.Question.CodeSnippets {
-		snippets[cs.LangSlug] = cs.Code
-	}
-
-	return LeetcodeProblem{
-		QuestionID:   pr.Data.Question.QuestionID,
-		Title:        pr.Data.Question.Title,
-		TitleSlug:    pr.Data.Question.TitleSlug,
-		Difficulty:   pr.Data.Question.Difficulty,
-		Content:      pr.Data.Question.Content,
-		Examples:     pr.Data.Question.ExampleTestcases,
-		CodeSnippets: snippets,
-		Hints:        pr.Data.Question.Hints,
-	}, nil
-}
-
-func PostDailyChallenge(session *discordgo.Session, slug string) {
-	var builder strings.Builder
 	cfg := config.ParseConfig()
-
-	daily, err := GetProblemBySlug(slug)
-	if err != nil {
-		log.Printf("Error fetching challenge: %v", err)
-	}
-
-	builder.WriteString(fmt.Sprintf("**Problem Name:** %s\n", daily.Title))
-	builder.WriteString(fmt.Sprintf("**Difficulty:** %s\n", daily.Difficulty))
-
-	link := fmt.Sprintf("https://leetcode.com/problems/%s/", daily.TitleSlug)
-	builder.WriteString(fmt.Sprintf("**Link:** \n%s\n", link))
-
-	if IsNeetcode150Slug(daily.TitleSlug) {
-		builder.WriteString("\n**Part of Neetcode 150**")
-	}
-
 	ping := fmt.Sprintf("<@&%s> ", cfg.LeetcodeRoleID)
 
-	utils.SendPingMessageComplex(session, cfg.DefaultChannel, "Daily Neetcode All Challenge", ping, builder.String())
+	err = utils.SendPingMessageComplex(session, cfg.DefaultChannel, "Daily Neetcode Challenge", ping, message)
+	if err != nil {
+		log.Printf("failed to respond: %v", err)
+		return
+	}
+}
+
+// buildDailyChallengeMessage formats the API response into a Discord-friendly message
+func buildDailyChallengeMessage(q *QuestionDetail) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("**Problem Name:** %s\n", q.Title))
+	sb.WriteString(fmt.Sprintf("**Difficulty:** %s\n", q.Difficulty))
+
+	link := fmt.Sprintf("https://leetcode.com/problems/%s/", q.TitleSlug)
+	sb.WriteString(fmt.Sprintf("**Link:**\n%s\n", link))
+
+	if IsNeetcode150Slug(q.TitleSlug) {
+		sb.WriteString("\n**Part of Neetcode 150**")
+	}
+
+	return sb.String()
 }

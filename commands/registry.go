@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"log"
+
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -75,10 +77,49 @@ func RegisterCommands(s *discordgo.Session) []*discordgo.ApplicationCommand {
 				},
 			},
 		},
+		{
+			// /curated <difficulty>
+			Name:        "curated",
+			Description: "Show most common LeetCode problems across companies",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:        "difficulty",
+					Description: "Filter by difficulty",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "Easy", Value: "easy"},
+						{Name: "Medium", Value: "medium"},
+						{Name: "Hard", Value: "hard"},
+						{Name: "All", Value: "all"},
+					},
+				},
+			},
+		},
+		{
+			// /problem <slug>
+			Name:        "problem",
+			Description: "Get LeetCode problem details by slug",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:        "slug",
+					Description: "slug (e.g., two-sum)",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "eostrix",
+			Description: "Show bot command directory and features",
+		},
 	}
 
-	for _, cmd := range commands {
-		_, _ = s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
+	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", commands)
+	if err != nil {
+		log.Printf("Failed to register commands: %v", err)
+	} else {
+		log.Printf("Registered %d commands", len(commands))
 	}
 
 	return commands

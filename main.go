@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -27,11 +28,14 @@ func main() {
 	}
 	defer disc.Close()
 
-	initHandlers(disc)
-
-	if err := loadFeatures(disc); err != nil {
-		log.Fatal(err)
+	apiClient := leetcode.NewLeetCodeClient()
+	store := leetcode.NewProblemStore()
+	if err := store.Load("data"); err != nil {
+		log.Fatalf("failed to load leetcode data: %v", err)
 	}
+
+	initHandlers(disc, store, apiClient)
+	loadFeatures(disc, store, apiClient)
 
 	fmt.Println("bot has started ...")
 	c := make(chan os.Signal, 1)
@@ -39,52 +43,68 @@ func main() {
 	<-c
 }
 
-func initHandlers(disc *discordgo.Session) {
-	commands.RegisterCommands(disc)
-	disc.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if i.Type == discordgo.InteractionApplicationCommand {
-			switch i.ApplicationCommandData().Name {
-			case "company":
-				commands.HandleCompanyCommand(s, i)
-			case "randlc":
-				commands.HandleRandCommand(s, i)
-			case "topics":
-				commands.HandleTopicsCommand(s, i)
-			}
-		}
-		if i.Type == discordgo.InteractionMessageComponent {
-			cid := i.MessageComponentData().CustomID
+func initHandlers(session *discordgo.Session, store *leetcode.ProblemStore, apiClient *leetcode.LeetCodeClient) {
+	commands.RegisterCommands(session)
 
-			switch {
-			case strings.HasPrefix(cid, "company_"):
-				commands.HandleCompanyPageChange(s, i, 0)
-			case strings.HasPrefix(cid, "topics_"):
-				commands.HandleTopicsPageChange(s, i)
-			}
-			return
-		}
-	})
-
-	disc.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if i.Type == discordgo.InteractionApplicationCommandAutocomplete {
-
-			switch i.ApplicationCommandData().Name {
-			case "company":
-				commands.CompanyAutocomplete(s, i)
-			case "topics":
-				commands.TopicsAutocomplete(s, i)
-			}
+	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			handleSlashCommand(s, i, store, apiClient)
+		case discordgo.InteractionApplicationCommandAutocomplete:
+			handleAutocomplete(s, i, store)
+		case discordgo.InteractionMessageComponent:
+			handleComponentInteraction(s, i, store)
 		}
 	})
 }
 
-func loadFeatures(disc *discordgo.Session) error {
+func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore, apiClient *leetcode.LeetCodeClient) {
+	switch i.ApplicationCommandData().Name {
+	case "company":
+		commands.HandleCompanyCommand(s, i, store)
+	case "randlc":
+		commands.HandleRandCommand(s, i, store)
+	case "topics":
+		commands.HandleTopicsCommand(s, i, store)
+	case "curated":
+		commands.HandleCuratedCommand(s, i, store)
+	case "problem":
+		commands.HandleProblemCommand(s, i, apiClient)
+	case "eostrix":
+		commands.HandleEostrixCommand(s, i)
+	}
+}
+
+func handleAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
+	switch i.ApplicationCommandData().Name {
+	case "company":
+		commands.CompanyAutocomplete(s, i, store)
+	case "topics":
+		commands.TopicsAutocomplete(s, i, store)
+	}
+}
+
+func handleComponentInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, store *leetcode.ProblemStore) {
+	cid := i.MessageComponentData().CustomID
+	switch {
+	case strings.HasPrefix(cid, "company|"):
+		commands.HandleCompanyPageChange(s, i, store)
+	case strings.HasPrefix(cid, "topics|"):
+		commands.HandleTopicsPageChange(s, i, store)
+	case strings.HasPrefix(cid, "curated|"):
+		commands.HandleCuratedPageChange(s, i, store)
+	}
+}
+
+func loadFeatures(session *discordgo.Session, store *leetcode.ProblemStore, apiClient *leetcode.LeetCodeClient) {
 	utils.ScheduleMidnightUTCEvent(func() {
-		leetcode.PostDailyChallenge(disc, leetcode.GetRandomNeetcodeSlug())
+		slug := leetcode.GetRandomNeetcodeSlug()
+		leetcode.PostDailyChallenge(session, slug, apiClient)
 	})
 
-	_, err := leetcode.LoadAllProblems("data")
-	leetcode.BuildCuratedProblems()
+	store.BuildCuratedProblems()
+	leetcode.InitPagination(15 * time.Minute)
 
-	return err
+	log.Printf("Built curated list: %d problems",
+		store.CuratedCount())
 }

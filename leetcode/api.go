@@ -1,0 +1,121 @@
+package leetcode
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+// LeetCodeClient is a minimal GraphQL client for LeetCode
+type LeetCodeClient struct {
+	Client *http.Client
+}
+
+// NewLeetCodeClient returns a client with a sensible timeout
+func NewLeetCodeClient() *LeetCodeClient {
+	return &LeetCodeClient{
+		Client: &http.Client{Timeout: 15 * time.Second},
+	}
+}
+
+// QuestionDetail contains the parsed LeetCode problem data
+type QuestionDetail struct {
+	QuestionId string `json:"questionId"`
+	Title      string `json:"title"`
+	TitleSlug  string `json:"titleSlug"`
+	Difficulty string `json:"difficulty"`
+	TopicTags  []struct {
+		Name string `json:"name"`
+	} `json:"topicTags"`
+	Stats  string  `json:"stats"`
+	AcRate float64 `json:"acRate"`
+}
+
+type graphqlRequest struct {
+	Query     string            `json:"query"`
+	Variables map[string]string `json:"variables"`
+}
+
+type graphqlResponse struct {
+	Data struct {
+		Question QuestionDetail `json:"question"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+const questionQuery = `
+query getQuestionDetail($titleSlug: String!) {
+  question(titleSlug: $titleSlug) {
+    questionId
+    title
+    titleSlug
+    difficulty
+    topicTags { name }
+    stats
+    acRate
+  }
+}`
+
+// GetBySlug fetches a problem by its URL slug (e.g., "two-sum")
+func (c *LeetCodeClient) GetBySlug(ctx context.Context, slug string) (*QuestionDetail, error) {
+	reqBody := graphqlRequest{
+		Query:     questionQuery,
+		Variables: map[string]string{"titleSlug": slug},
+	}
+	return c.fetch(ctx, reqBody)
+}
+
+// fetch executes the GraphQL request and parses the response
+func (c *LeetCodeClient) fetch(ctx context.Context, body graphqlRequest) (*QuestionDetail, error) {
+	jsonData, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://leetcode.com/graphql", bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Origin", "https://leetcode.com")
+	req.Header.Set("Referer", "https://leetcode.com/problems/")
+	req.Header.Set("x-requested-with", "XMLHttpRequest")
+
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var gqlResp graphqlResponse
+	if err := json.Unmarshal(bodyBytes, &gqlResp); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	if len(gqlResp.Errors) > 0 {
+		return nil, fmt.Errorf("GraphQL error: %s", gqlResp.Errors[0].Message)
+	}
+
+	if gqlResp.Data.Question.TitleSlug == "" {
+		return nil, fmt.Errorf("problem not found")
+	}
+
+	return &gqlResp.Data.Question, nil
+}

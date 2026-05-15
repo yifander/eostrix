@@ -4,9 +4,12 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 // represents an individual leetcode problem found within the csv file
@@ -20,15 +23,32 @@ type Problem struct {
 	Topics         []string
 }
 
-var (
-	AllProblems          []Problem
-	ProblemsByCompany    map[string][]*Problem
-	ProblemsByDifficulty map[string][]*Problem
-	ProblemsByTopic      map[string][]*Problem
-	topicSet             = map[string]struct{}{}
-	ValidCompanies       []string
-	ValidTopics          []string
-)
+type ProblemStore struct {
+	mu sync.RWMutex
+
+	allProblems    []Problem
+	byCompany      map[string][]*Problem
+	byDifficulty   map[string][]*Problem
+	byTopic        map[string][]*Problem
+	validCompanies []string
+	validTopics    []string
+	topicSet       map[string]struct{}
+	lastLoadedTime time.Time
+	sourceChecksum string
+
+	// see curated.go for more on this list type
+	curatedMu       sync.RWMutex
+	curatedProblems []*CuratedProblem
+}
+
+func NewProblemStore() *ProblemStore {
+	return &ProblemStore{
+		byCompany:    make(map[string][]*Problem),
+		byDifficulty: make(map[string][]*Problem),
+		byTopic:      make(map[string][]*Problem),
+		topicSet:     make(map[string]struct{}),
+	}
+}
 
 // search each company folder for the correct six month cvs file
 func findSixMonthCSV(companyDir string) (string, error) {
@@ -44,22 +64,14 @@ func findSixMonthCSV(companyDir string) (string, error) {
 	return "", fmt.Errorf("a six month csv not found in %s", companyDir)
 }
 
-// load the leetcode problems from the six month cvs files to the CompanyProblem struct
-func LoadAllProblems(rootDir string) ([]Problem, error) {
-	AllProblems = make([]Problem, 0)
-
-	ProblemsByCompany = make(map[string][]*Problem)
-	ProblemsByDifficulty = make(map[string][]*Problem)
-	ProblemsByTopic = make(map[string][]*Problem)
-
-	ValidCompanies = nil
-	ValidTopics = nil
-	topicSet = make(map[string]struct{})
-
+func readAllCSVs(rootDir string) ([]Problem, []string, error) {
 	entries, err := os.ReadDir(rootDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("failed to read root dir %s: %w", rootDir, err)
 	}
+
+	var allProblems []Problem
+	var companies []string
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -68,101 +80,195 @@ func LoadAllProblems(rootDir string) ([]Problem, error) {
 
 		companyName := entry.Name()
 		companyDir := filepath.Join(rootDir, companyName)
-		ValidCompanies = append(ValidCompanies, companyName)
+		companies = append(companies, companyName)
 
 		csvPath, err := findSixMonthCSV(companyDir)
 		if err != nil {
-			fmt.Printf("Skipping %s: %v\n", companyName, err)
+			log.Printf("Skipping %s: %v", companyName, err)
 			continue
 		}
 
 		f, err := os.Open(csvPath)
 		if err != nil {
-			fmt.Printf("Failed to open %s: %v\n", csvPath, err)
+			log.Printf("Failed to open %s: %v", csvPath, err)
 			continue
 		}
 
-		r := csv.NewReader(f)
-
-		if _, err := r.Read(); err != nil {
-			f.Close()
-			fmt.Printf("Failed to read header of %s: %v\n", csvPath, err)
-			continue
-		}
-
-		for {
-			record, err := r.Read()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				fmt.Printf("error reading %s: %v\n", csvPath, err)
-				continue
-			}
-
-			if len(record) < 5 {
-				fmt.Printf("skipping bad row in %s: %v\n", csvPath, record)
-				continue
-			}
-
-			topics := parseTopics(record[5:])
-
-			AllProblems = append(AllProblems, Problem{
-				Company:        companyName,
-				Difficulty:     record[0],
-				Title:          record[1],
-				Frequency:      record[2],
-				AcceptanceRate: record[3],
-				Link:           record[4],
-				Topics:         topics,
-			})
-
-			pp := &AllProblems[len(AllProblems)-1]
-
-			createIndexes(pp)
-		}
-
+		problems, err := parseCompanyCSV(f, companyName)
 		f.Close()
+		if err != nil {
+			log.Printf("Error parsing %s: %v", csvPath, err)
+			continue
+		}
+
+		allProblems = append(allProblems, problems...)
 	}
 
-	fmt.Printf("Loaded %d problems across %d companies\n", len(AllProblems), len(entries))
-	fmt.Printf("Loaded %d topics accross %d problems\n", len(ValidTopics), len(AllProblems))
-
-	return AllProblems, nil
+	return allProblems, companies, nil
 }
 
-// index for company, difficulty, and topics
-func createIndexes(p *Problem) {
-	companyKey := strings.ToLower(p.Company)
-	ProblemsByCompany[companyKey] = append(ProblemsByCompany[companyKey], p)
+func parseCompanyCSV(f *os.File, companyName string) ([]Problem, error) {
+	r := csv.NewReader(f)
 
-	diffKey := strings.ToLower(p.Difficulty)
-	ProblemsByDifficulty[diffKey] = append(ProblemsByDifficulty[diffKey], p)
-
-	for _, t := range p.Topics {
-		key := strings.ToLower(t)
-
-		ProblemsByTopic[key] = append(ProblemsByTopic[key], p)
-
-		if _, exists := topicSet[key]; !exists {
-			topicSet[key] = struct{}{}
-			ValidTopics = append(ValidTopics, t)
-		}
+	if _, err := r.Read(); err != nil {
+		return nil, fmt.Errorf("failed to read header: %w", err)
 	}
+
+	var problems []Problem
+	for {
+		record, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("Error reading row: %v", err)
+			continue
+		}
+
+		if len(record) < 5 {
+			continue
+		}
+
+		problems = append(problems, Problem{
+			Company:        companyName,
+			Difficulty:     record[0],
+			Title:          record[1],
+			Frequency:      record[2],
+			AcceptanceRate: record[3],
+			Link:           record[4],
+			Topics:         parseTopics(record[5:]),
+		})
+	}
+
+	return problems, nil
 }
 
 func parseTopics(columns []string) []string {
 	var topics []string
-
 	for _, col := range columns {
-		// im using an old go version (1.23) so split is preferable to splitseq here
-		for _, part := range strings.Split(col, ",") {
+		for part := range strings.SplitSeq(col, ",") {
 			topic := strings.TrimSpace(part)
 			if topic != "" {
 				topics = append(topics, topic)
 			}
 		}
 	}
-
 	return topics
+}
+
+// Load parses all company CSVs and builds in-memory indexes.
+// Safe to call multiple times; replaces existing data atomically.
+func (s *ProblemStore) Load(rootDir string) error {
+	tempProblems, companies, err := readAllCSVs(rootDir)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.allProblems = tempProblems
+	s.validCompanies = companies
+	s.byCompany = make(map[string][]*Problem)
+	s.byDifficulty = make(map[string][]*Problem)
+	s.byTopic = make(map[string][]*Problem)
+	s.topicSet = make(map[string]struct{})
+	s.validTopics = s.validTopics[:0] // reset but keep capacity
+
+	for i := range s.allProblems {
+		s.createIndexes(&s.allProblems[i])
+	}
+
+	log.Printf("Loaded %d problems across %d companies", len(s.allProblems), len(s.validCompanies))
+	log.Printf("Indexed %d unique topics", len(s.validTopics))
+	return nil
+}
+
+// only call while holding s.mu.Lock()
+func (s *ProblemStore) createIndexes(p *Problem) {
+	companyKey := strings.ToLower(p.Company)
+	s.byCompany[companyKey] = append(s.byCompany[companyKey], p)
+
+	diffKey := strings.ToLower(p.Difficulty)
+	s.byDifficulty[diffKey] = append(s.byDifficulty[diffKey], p)
+
+	for _, t := range p.Topics {
+		key := strings.ToLower(t)
+		s.byTopic[key] = append(s.byTopic[key], p)
+
+		if _, exists := s.topicSet[key]; !exists {
+			s.topicSet[key] = struct{}{}
+			s.validTopics = append(s.validTopics, t)
+		}
+	}
+}
+
+// accessors below
+
+func (s *ProblemStore) All() []Problem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]Problem, len(s.allProblems))
+	copy(out, s.allProblems)
+
+	return out
+}
+
+func (s *ProblemStore) ByCompany(company string) []*Problem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.byCompany[strings.ToLower(company)]
+}
+
+func (s *ProblemStore) ByTopic(topic string) []*Problem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.byTopic[strings.ToLower(topic)]
+}
+
+func (s *ProblemStore) ByDifficulty(difficulty string) []*Problem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.byDifficulty[strings.ToLower(difficulty)]
+}
+
+func (s *ProblemStore) Companies() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]string, len(s.validCompanies))
+	copy(out, s.validCompanies)
+
+	return out
+}
+
+func (s *ProblemStore) Topics() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]string, len(s.validTopics))
+	copy(out, s.validTopics)
+
+	return out
+}
+
+func (s *ProblemStore) TopCuratedByDifficulty(limit int, difficulty string) []*CuratedProblem {
+	s.curatedMu.RLock()
+	defer s.curatedMu.RUnlock()
+
+	var filtered []*CuratedProblem
+	for _, cp := range s.curatedProblems {
+		if difficulty == "all" || strings.EqualFold(cp.Problem.Difficulty, difficulty) {
+			filtered = append(filtered, cp)
+		}
+	}
+
+	if limit > len(filtered) {
+		limit = len(filtered)
+	}
+	return filtered[:limit]
 }

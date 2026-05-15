@@ -14,8 +14,6 @@ type CuratedProblem struct {
 	Score       float64
 }
 
-var CuratedProblems []*CuratedProblem
-
 func normalizeFrequency(freq string) float64 {
 	switch strings.ToLower(strings.TrimSpace(freq)) {
 	case "high":
@@ -29,12 +27,14 @@ func normalizeFrequency(freq string) float64 {
 	}
 }
 
-func BuildCuratedProblems() {
+func (s *ProblemStore) BuildCuratedProblems() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	index := make(map[string]*CuratedProblem)
 
-	for company, problems := range ProblemsByCompany {
+	for company, problems := range s.byCompany {
 		for _, p := range problems {
-
 			key := strings.ToLower(p.Title)
 
 			entry, ok := index[key]
@@ -52,17 +52,34 @@ func BuildCuratedProblems() {
 		}
 	}
 
-	CuratedProblems = make([]*CuratedProblem, 0, len(index))
-
-	for _, p := range index {
-		companyCount := len(p.Companies)
-		avgFreq := p.FreqSum / float64(p.Appearances)
-
-		p.Score = math.Log1p(float64(companyCount)) * avgFreq
-		CuratedProblems = append(CuratedProblems, p)
+	s.curatedProblems = make([]*CuratedProblem, 0, len(index))
+	for _, cp := range index {
+		companyCount := len(cp.Companies)
+		avgFreq := cp.FreqSum / float64(cp.Appearances)
+		// score: log-scaled company breadth * average frequency weight
+		cp.Score = math.Log1p(float64(companyCount)) * avgFreq
+		s.curatedProblems = append(s.curatedProblems, cp)
 	}
 
-	sort.Slice(CuratedProblems, func(i, j int) bool {
-		return CuratedProblems[i].Score > CuratedProblems[j].Score
+	sort.Slice(s.curatedProblems, func(i, j int) bool {
+		return s.curatedProblems[i].Score > s.curatedProblems[j].Score
 	})
+}
+
+func (s *ProblemStore) TopCurated(n int) []*CuratedProblem {
+	s.curatedMu.RLock()
+	defer s.curatedMu.RUnlock()
+
+	if n > len(s.curatedProblems) {
+		n = len(s.curatedProblems)
+	}
+
+	return s.curatedProblems[:n]
+}
+
+func (s *ProblemStore) CuratedCount() int {
+	s.curatedMu.RLock()
+	defer s.curatedMu.RUnlock()
+
+	return len(s.curatedProblems)
 }
