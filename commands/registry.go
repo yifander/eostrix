@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"log"
+
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -113,8 +115,11 @@ func RegisterCommands(s *discordgo.Session) []*discordgo.ApplicationCommand {
 		},
 	}
 
-	for _, cmd := range commands {
-		_, _ = s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
+	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", commands)
+	if err != nil {
+		log.Printf("Failed to register commands: %v", err)
+	} else {
+		log.Printf("Registered %d commands", len(commands))
 	}
 
 	return commands
